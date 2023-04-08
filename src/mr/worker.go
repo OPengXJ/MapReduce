@@ -1,10 +1,17 @@
 package mr
 
-import "fmt"
-import "log"
-import "net/rpc"
-import "hash/fnv"
-
+import (
+	"encoding/json"
+	"fmt"
+	"hash/fnv"
+	"io/ioutil"
+	"log"
+	"net/rpc"
+	"os"
+	"plugin"
+	"strconv"
+	"time"
+)
 
 //
 // Map functions return a slice of KeyValue.
@@ -24,7 +31,6 @@ func ihash(key string) int {
 	return int(h.Sum32() & 0x7fffffff)
 }
 
-
 //
 // main/mrworker.go calls this function.
 //
@@ -35,7 +41,10 @@ func Worker(mapf func(string, string) []KeyValue,
 
 	// uncomment to send the Example RPC to the master.
 	// CallExample()
-
+	for {
+		CallHandOutTask(mapf, reducef)
+		time.Sleep(1 * time.Second)
+	}
 }
 
 //
@@ -61,6 +70,26 @@ func CallExample() {
 	fmt.Printf("reply.Y %v\n", reply.Y)
 }
 
+func CallHandOutTask(mapf func(string, string) []KeyValue,
+	reducef func(string, []string) string) {
+	reply := HandOutTaskReply{}
+	args := HandOutTaskArgs{}
+	call("Master.HandOutTask", &args, &reply)
+	// the task is map
+	if reply.Y.TaskType == 1 {
+		fileNames := HandleMap(reply.Y, mapf)
+		taskDoneArgs := TaskDoneArgs{
+			TaskName:  reply.Y.Taskname,
+			TaskType:  1,
+			FileNames: fileNames,
+		}
+		taskDoneReply := TaskDoneReply{}
+		call("Master.TaskDone", &taskDoneArgs, &taskDoneReply)
+	} else {
+		fmt.Println(reply.Y.IntermediateFileNames)
+	}
+}
+
 //
 // send an RPC request to the master, wait for the response.
 // usually returns true.
@@ -82,4 +111,60 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 
 	fmt.Println(err)
 	return false
+}
+
+func loadPlugin(filename string) (func(string, string) []KeyValue, func(string, []string) string) {
+	p, err := plugin.Open(filename)
+	if err != nil {
+		log.Fatalf("cannot load plugin %v", filename)
+	}
+	xmapf, err := p.Lookup("Map")
+	if err != nil {
+		log.Fatalf("cannot find Map in %v", filename)
+	}
+	mapf := xmapf.(func(string, string) []KeyValue)
+	xreducef, err := p.Lookup("Reduce")
+	if err != nil {
+		log.Fatalf("cannot find Reduce in %v", filename)
+	}
+	reducef := xreducef.(func(string, []string) string)
+
+	return mapf, reducef
+}
+
+func HandleMap(task Task, mapf func(string, string) []KeyValue) []string {
+
+	intermediate := []KeyValue{}
+	filename := task.InputFileName
+	file, err := os.Open(filename)
+	if err != nil {
+		log.Fatalf("cannot open %v", filename)
+	}
+	content, err := ioutil.ReadAll(file)
+	if err != nil {
+		log.Fatalf("cannot read %v", filename)
+	}
+	file.Close()
+	kva := mapf(filename, string(content))
+	intermediate = append(intermediate, kva...)
+
+	// output intermediate to R local file
+	R := task.NReduce
+	fileNames := make([]string, R)
+	files := make([]*os.File, R)
+	for i := 0; i < R; i++ {
+		filename :="mr" + "-" + strconv.Itoa(task.Taskname) + "-" + strconv.Itoa(i)
+		file, _ := os.Create(filename)
+		files[i] = file
+		fileNames[i] = filename
+	}
+
+	for _, kv := range intermediate {
+		// make a key or some same key to same file
+		fmt.Println(kv.Key,R)
+		index := ihash(kv.Key) % R
+		enc := json.NewEncoder(files[index])
+		enc.Encode(&kv)
+	}
+	return fileNames
 }
