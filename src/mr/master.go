@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Master struct {
@@ -52,38 +53,39 @@ func (m *Master) HandOutTask(args *HandOutTaskArgs, reply *HandOutTaskReply) err
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.state < 1 {
-		nextTaskNum := m.mapTaskFinishNum
-		for ; nextTaskNum < len(m.mapTask); nextTaskNum++ {
-			if m.mapTask[nextTaskNum].State == 0 {
-				m.mapTask[nextTaskNum].NReduce = m.nReduce
-				m.mapTask[nextTaskNum].TaskType = 1
-				m.mapTask[nextTaskNum].State = 1
-				m.mapTask[nextTaskNum].Taskname = nextTaskNum
-				fmt.Println(m.mapTask[nextTaskNum])
-				reply.Y = *m.mapTask[nextTaskNum]
+		for _, task := range m.mapTask {
+			if task.State == 0 {
+				task.State = 1
+				reply.Y = *task
+				go m.Check(1, task.Taskname)
 				return nil
 			}
 		}
 	} else {
 		for _, v := range m.reduceTask {
 			if v.State == 0 {
-				v.TaskType = 2
 				v.State = 1
-				reply.Y=*v
+				reply.Y = *v
+				go m.Check(2, v.Taskname)
 				return nil
 			}
 		}
 	}
 	reply.Y = Task{}
-	return fmt.Errorf("Map tasks have hand out all")
+	return fmt.Errorf("tasks have hand out all")
 }
 
 func (m *Master) TaskDone(args *TaskDoneArgs, reply *TaskDoneReply) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if args.TaskType == 1 {
+		// late's task
+		if m.mapTask[args.TaskName].State == 2 {
+			return nil
+		}
 		taskName := args.TaskName
 		m.mapTask[taskName].State = 2
+		fmt.Println(args.FileNames)
 		for _, filename := range args.FileNames {
 			index := strings.LastIndex(filename, "-")
 			num, _ := strconv.Atoi(filename[index+1:])
@@ -98,12 +100,37 @@ func (m *Master) TaskDone(args *TaskDoneArgs, reply *TaskDoneReply) error {
 				m.reduceTask[num] = task
 			}
 		}
+		fmt.Println(m.reduceTask[0].IntermediateFileNames)
 		m.mapTaskFinishNum++
 		if m.mapTaskFinishNum == len(m.mapTask) {
 			m.state = 1
 		}
+	} else {
+		// late's task
+		if m.reduceTask[args.TaskName].State == 2 {
+			return nil
+		}
+		taskName := args.TaskName
+		m.reduceTask[taskName].State = 2
+		m.reduceTaskFinishNum++
+		if m.reduceTaskFinishNum == len(m.reduceTask) {
+			m.state = 2
+		}
 	}
 	return nil
+}
+
+func (m *Master) Check(taskType int, taskName int) {
+	time.Sleep(10*time.Second)
+	if taskType==1{
+		if m.mapTask[taskName].State==1{
+			m.mapTask[taskName].State = 0
+		}
+	}else{
+		if m.reduceTask[taskName].State==1{
+			m.reduceTask[taskName].State=0
+		}
+	}
 }
 
 //
@@ -128,7 +155,9 @@ func (m *Master) server() {
 //
 func (m *Master) Done() bool {
 	ret := false
-
+	if m.state == 2 {
+		ret = true
+	}
 	// Your code here.
 
 	return ret
@@ -140,7 +169,7 @@ func (m *Master) Done() bool {
 // nReduce is the number of reduce tasks to use.
 //
 func MakeMaster(files []string, nReduce int) *Master {
-	fmt.Println("make master",nReduce)
+	fmt.Println("make master", nReduce)
 	m := Master{
 		state:      0,
 		nReduce:    nReduce,
@@ -151,8 +180,9 @@ func MakeMaster(files []string, nReduce int) *Master {
 
 	// Your code here.
 	// init map task
-	for _, filename := range files {
+	for i, filename := range files {
 		newTask := &Task{
+			Taskname:      i,
 			TaskType:      1,
 			State:         0,
 			InputFileName: filename,

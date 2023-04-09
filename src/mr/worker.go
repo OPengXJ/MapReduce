@@ -9,9 +9,18 @@ import (
 	"net/rpc"
 	"os"
 	"plugin"
+	"sort"
 	"strconv"
 	"time"
 )
+
+// sort
+type ByKey []KeyValue
+
+// for sorting by key.
+func (a ByKey) Len() int           { return len(a) }
+func (a ByKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a ByKey) Less(i, j int) bool { return a[i].Key < a[j].Key }
 
 //
 // Map functions return a slice of KeyValue.
@@ -75,6 +84,9 @@ func CallHandOutTask(mapf func(string, string) []KeyValue,
 	reply := HandOutTaskReply{}
 	args := HandOutTaskArgs{}
 	call("Master.HandOutTask", &args, &reply)
+	if reply.Y.State==0{
+		return
+	}
 	// the task is map
 	if reply.Y.TaskType == 1 {
 		fileNames := HandleMap(reply.Y, mapf)
@@ -86,7 +98,13 @@ func CallHandOutTask(mapf func(string, string) []KeyValue,
 		taskDoneReply := TaskDoneReply{}
 		call("Master.TaskDone", &taskDoneArgs, &taskDoneReply)
 	} else {
-		fmt.Println(reply.Y.IntermediateFileNames)
+		HandleReduce(reply.Y,reducef)
+		taskDoneArgs:=TaskDoneArgs{
+			TaskName: reply.Y.Taskname,
+			TaskType: 2,
+		}
+		taskDoneReply := TaskDoneReply{}
+		call("Master.TaskDone", &taskDoneArgs, &taskDoneReply)
 	}
 }
 
@@ -153,7 +171,7 @@ func HandleMap(task Task, mapf func(string, string) []KeyValue) []string {
 	fileNames := make([]string, R)
 	files := make([]*os.File, R)
 	for i := 0; i < R; i++ {
-		filename :="mr" + "-" + strconv.Itoa(task.Taskname) + "-" + strconv.Itoa(i)
+		filename := "mr" + "-" + strconv.Itoa(task.Taskname) + "-" + strconv.Itoa(i)
 		file, _ := os.Create(filename)
 		files[i] = file
 		fileNames[i] = filename
@@ -161,10 +179,49 @@ func HandleMap(task Task, mapf func(string, string) []KeyValue) []string {
 
 	for _, kv := range intermediate {
 		// make a key or some same key to same file
-		fmt.Println(kv.Key,R)
 		index := ihash(kv.Key) % R
 		enc := json.NewEncoder(files[index])
 		enc.Encode(&kv)
 	}
 	return fileNames
+}
+
+func HandleReduce(task Task, reducef func(string, []string) string) {
+	//read intermediate keyvalue
+	intermediate := []KeyValue{}
+	fmt.Println(task.IntermediateFileNames,task.Taskname)
+	for _, v := range task.IntermediateFileNames {
+		file, _ := os.Open(v)
+		dec := json.NewDecoder(file)
+		for {
+			var kv KeyValue
+			if err := dec.Decode(&kv); err != nil {
+				break
+			}
+			intermediate = append(intermediate, kv)
+		}
+	}
+	// sort first	for preference
+	sort.Sort(ByKey(intermediate))
+
+	fileName := "mr-out-" + strconv.Itoa(task.Taskname)
+	ofile, _ := os.Create(fileName)
+	i := 0
+	for i < len(intermediate) {
+		j := i + 1
+		for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
+			j++
+		}
+		values := []string{}
+		for k := i; k < j; k++ {
+			values = append(values, intermediate[k].Value)
+		}
+		output := reducef(intermediate[i].Key, values)
+
+		// this is the correct format for each line of Reduce output.
+		
+		fmt.Fprintf(ofile, "%v %v\n", intermediate[i].Key, output)
+
+		i = j
+	}
 }

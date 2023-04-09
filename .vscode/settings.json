@@ -1,0 +1,21 @@
+{
+	"go.useLanguageServer": true,
+	"go.gopath": "/root/workplace/Golang/6.824:/root/go",
+	
+	"[go]": {
+	    "editor.snippetSuggestions": "none",
+	    "editor.formatOnSave": true,
+	    "editor.codeActionsOnSave": {
+	        "source.organizeImports": true
+	    }
+	},
+	
+	"gopls": {
+	    "completeUnimported": true,
+	    "usePlaceholders": true,
+	    "completionDocumentation": true,
+	    "hoverKind": "SynopsisDocumentation" // No/Synopsis/Full, default Synopsis
+	},
+	
+	"files.eol": "\n", // formatting only supports LF line endings
+}
