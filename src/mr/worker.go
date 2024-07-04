@@ -85,6 +85,7 @@ func CallHandOutTask(mapf func(string, string) []KeyValue,
 	args := HandOutTaskArgs{}
 	call("Master.HandOutTask", &args, &reply)
 	if reply.Y.State==0{
+		time.Sleep(1*time.Second)
 		return
 	}
 	// the task is map
@@ -189,7 +190,6 @@ func HandleMap(task Task, mapf func(string, string) []KeyValue) []string {
 func HandleReduce(task Task, reducef func(string, []string) string) {
 	//read intermediate keyvalue
 	intermediate := []KeyValue{}
-	fmt.Println(task.IntermediateFileNames,task.Taskname)
 	for _, v := range task.IntermediateFileNames {
 		file, _ := os.Open(v)
 		dec := json.NewDecoder(file)

@@ -85,7 +85,6 @@ func (m *Master) TaskDone(args *TaskDoneArgs, reply *TaskDoneReply) error {
 		}
 		taskName := args.TaskName
 		m.mapTask[taskName].State = 2
-		fmt.Println(args.FileNames)
 		for _, filename := range args.FileNames {
 			index := strings.LastIndex(filename, "-")
 			num, _ := strconv.Atoi(filename[index+1:])
@@ -100,7 +99,6 @@ func (m *Master) TaskDone(args *TaskDoneArgs, reply *TaskDoneReply) error {
 				m.reduceTask[num] = task
 			}
 		}
-		fmt.Println(m.reduceTask[0].IntermediateFileNames)
 		m.mapTaskFinishNum++
 		if m.mapTaskFinishNum == len(m.mapTask) {
 			m.state = 1
@@ -169,7 +167,6 @@ func (m *Master) Done() bool {
 // nReduce is the number of reduce tasks to use.
 //
 func MakeMaster(files []string, nReduce int) *Master {
-	fmt.Println("make master", nReduce)
 	m := Master{
 		state:      0,
 		nReduce:    nReduce,
