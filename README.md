@@ -24,3 +24,7 @@ sh test-mr.sh
 
 ##接着会输出各种测试结果
 ```
+
+主要完成代码在`mr/master.go`、 `mr/worker.go`和`mr/rpc.go`中
+
+实验要求：http://nil.csail.mit.edu/6.824/2020/labs/lab-mr.html
